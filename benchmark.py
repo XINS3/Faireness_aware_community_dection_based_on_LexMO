@@ -49,6 +49,9 @@ from modules.helpers import fairness_base, fairness_fexp
 # sFairSC import
 from sfairsc import s_fair_sc
 
+# Mutex Watershed import
+from mutexwatershed import mutex_watershed, Clustering, transform, convert_graph_to_custom_format
+
 
 # --- Debug logger -------------------------------------------------------------
 
@@ -158,6 +161,44 @@ def _sfairsc_wrapper(G, attb_map, W_sparse, D_sparse, F, k):
 	return [c for c in communities if c]  # drop empty communities
 
 
+def _mutex_watershed_wrapper(G, connect_all=False):
+	"""
+	Run Mutex Watershed on a NetworkX graph and return a list-of-sets partition.
+
+	Converts the graph to the [nodes_tuple, edge_weights_dict] format expected
+	by mutex_watershed, runs the algorithm, then converts the resulting Clustering
+	back to a list of frozensets compatible with NetworkX community metrics.
+	"""
+	nodes_tuple = tuple(G.nodes())
+	edge_weights_dict = {}
+	for u, v, data in G.edges(data=True):
+		edge_weights_dict[(u, v)] = data.get("weight", 1)
+
+	graph_fmt = [nodes_tuple, edge_weights_dict]
+	clustering = mutex_watershed(graph_fmt, connect_all)
+	clusters = clustering.clusters()  # dict: root -> [node, ...]
+	return [frozenset(members) for members in clusters.values() if members]
+
+
+def _mutex_watershed_transform_wrapper(G, connect_all=False):
+	"""
+	Run Mutex Watershed after deriving edge signs from node 'color' attributes
+	via transform().
+
+	Unlike _mutex_watershed_wrapper (which uses raw edge weights), this variant
+	ignores existing edge weights and reassigns ±1 based on whether endpoint
+	nodes share the same color. Edges between differently-colored nodes get
+	weight +1 (attractive); same-color edges are randomly assigned ±1 (50/50).
+
+	This matches the pipeline demonstrated in algorithm.ipynb.
+	"""
+	G_signed = transform(G)
+	graph_fmt = convert_graph_to_custom_format(G_signed)
+	clustering = mutex_watershed(graph_fmt, connect_all)
+	clusters = clustering.clusters()
+	return [frozenset(members) for members in clusters.values() if members]
+
+
 def build_algo_registry(sfairsc_k=(2, 3, 4, 5)):
 	"""
 	Return the full list of algorithm descriptors to benchmark.
@@ -206,6 +247,26 @@ def build_algo_registry(sfairsc_k=(2, 3, 4, 5)):
 			"alpha":    None,
 			"strategy": f"k={_k}",
 		})
+
+	# Mutex Watershed: connect_all=False (standard) and connect_all=True variants
+	for connect_all in [False, True]:
+		_ca = connect_all
+		label_suffix = "ConnectAll" if _ca else "Standard"
+		registry.append({
+			"name":     f"MutexWatershed-{label_suffix}",
+			"call":     lambda G, attb_map, mats, ca=_ca: _mutex_watershed_wrapper(G, ca),
+			"alpha":    None,
+			"strategy": f"connect_all={_ca}",
+		})
+
+	# Mutex Watershed via transform(): edge signs derived from node 'color' attributes
+	# rather than raw edge weights. Matches the pipeline in algorithm.ipynb.
+	registry.append({
+		"name":     "MutexWatershed-Transform",
+		"call":     lambda G, attb_map, mats: _mutex_watershed_transform_wrapper(G, connect_all=False),
+		"alpha":    None,
+		"strategy": "color->sign via transform()",
+	})
 
 	return registry
 
