@@ -220,24 +220,27 @@ class Clustering:
 
 
 
-def transform(G):
+def transform(G, same_color_p=0.5):
     """
     Convert a node-colored NetworkX graph to a signed-weight graph.
 
     For each edge (u, v):
       - weight =  1  if the two endpoint nodes have different colors (attractive)
-      - weight = -1  if they share the same color, with probability 0.5;
-                  1  otherwise (same-color edges are only repulsive half the time)
+      - weight = -1  if they share the same color, with probability (1 - same_color_p);
+                  1  otherwise
 
     Parameters
     ----------
     G : nx.Graph
         Input graph where every node has a 'color' attribute.
+    same_color_p : float
+        Probability of assigning weight +1 to a same-color edge (default 0.5).
+        0.0 = always repel same-color edges; 1.0 = always attract.
 
     Returns
     -------
     G_star : nx.Graph
-        Graph with the same nodes/edges as G but with integer ±1 'weight' attributes.
+        Graph with the same nodes/edges as G but with integer +-1 'weight' attributes.
     """
     import random as rd
     G_star = nx.Graph()
@@ -250,7 +253,7 @@ def transform(G):
         if src_color != tgt_color:
             G_star[source][target]['weight'] = 1
         else:
-            G_star[source][target]['weight'] = -1 if rd.random() > 0.5 else 1
+            G_star[source][target]['weight'] = 1 if rd.random() < same_color_p else -1
     return G_star
 
 

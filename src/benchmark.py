@@ -180,26 +180,26 @@ def _mutex_watershed_wrapper(G, connect_all=False):
 	return [frozenset(members) for members in clusters.values() if members]
 
 
-def _mutex_watershed_transform_wrapper(G, connect_all=False):
+def _mutex_watershed_transform_wrapper(G, connect_all=False, same_color_p=0.5):
 	"""
 	Run Mutex Watershed after deriving edge signs from node 'color' attributes
 	via transform().
 
 	Unlike _mutex_watershed_wrapper (which uses raw edge weights), this variant
-	ignores existing edge weights and reassigns ±1 based on whether endpoint
-	nodes share the same color. Edges between differently-colored nodes get
-	weight +1 (attractive); same-color edges are randomly assigned ±1 (50/50).
+	ignores existing edge weights and reassigns +/-1 based on whether endpoint
+	nodes share the same color. Cross-color edges are always +1 (attractive);
+	same-color edges are +1 with probability same_color_p, else -1.
 
 	This matches the pipeline demonstrated in algorithm.ipynb.
 	"""
-	G_signed = transform(G)
+	G_signed = transform(G, same_color_p=same_color_p)
 	graph_fmt = convert_graph_to_custom_format(G_signed)
 	clustering = mutex_watershed(graph_fmt, connect_all)
 	clusters = clustering.clusters()
 	return [frozenset(members) for members in clusters.values() if members]
 
 
-def build_algo_registry(sfairsc_k=(2, 3, 4, 5)):
+def build_algo_registry(sfairsc_k=(2, 3, 4, 5), transform_probs=(0.0, 0.25, 0.5, 0.75, 1.0)):
 	"""
 	Return the full list of algorithm descriptors to benchmark.
 
@@ -207,6 +207,10 @@ def build_algo_registry(sfairsc_k=(2, 3, 4, 5)):
 	----------
 	sfairsc_k : iterable of int
 		k values to sweep for sFairSC. Pass an empty list to skip sFairSC entirely.
+	transform_probs : iterable of float
+		Probability values for same-color edge attraction in MutexWatershed-Transform.
+		0.0 = same-color edges always repel; 1.0 = always attract. Pass an empty
+		list to skip MutexWatershed-Transform entirely.
 	"""
 	registry = list(FAL_ALGOS)
 
@@ -259,14 +263,18 @@ def build_algo_registry(sfairsc_k=(2, 3, 4, 5)):
 			"strategy": f"connect_all={_ca}",
 		})
 
-	# Mutex Watershed via transform(): edge signs derived from node 'color' attributes
-	# rather than raw edge weights. Matches the pipeline in algorithm.ipynb.
-	registry.append({
-		"name":     "MutexWatershed-Transform",
-		"call":     lambda G, attb_map, mats: _mutex_watershed_transform_wrapper(G, connect_all=False),
-		"alpha":    None,
-		"strategy": "color->sign via transform()",
-	})
+	# Mutex Watershed via transform(): sweep same_color_p
+	# 0.0 = same-color edges always repel; 1.0 = always attract
+	for p in transform_probs:
+		_p = p
+		registry.append({
+			"name":     "MutexWatershed-Transform",
+			"call":     lambda G, attb_map, mats, p=_p: _mutex_watershed_transform_wrapper(
+							G, connect_all=False, same_color_p=p
+						),
+			"alpha":    None,
+			"strategy": f"same_color_p={_p}",
+		})
 
 	return registry
 
@@ -418,7 +426,8 @@ def run_with_timeout(algo_call, G, attb_map, timeout, matrices=None):
 
 # --- Core benchmark loop ------------------------------------------------------
 
-def run_benchmark(network, n_runs, timeout=1800, sfairsc_k=(2, 3, 4, 5)):
+def run_benchmark(network, n_runs, timeout=1800, sfairsc_k=(2, 3, 4, 5),
+				  transform_probs=(0.0, 0.25, 0.5, 0.75, 1.0)):
 	"""
 	Run all algorithms on `network` for `n_runs` repetitions each.
 
@@ -432,11 +441,13 @@ def run_benchmark(network, n_runs, timeout=1800, sfairsc_k=(2, 3, 4, 5)):
 		Per-run wall-clock timeout in seconds (default 30 min).
 	sfairsc_k : iterable of int
 		k values to sweep for sFairSC (e.g. [3, 5]).
+	transform_probs : iterable of float
+		same_color_p values to sweep for MutexWatershed-Transform.
 	"""
 	print(f"\nRunning benchmark for network='{network}'\n{'='*50}")
 
 	G, attb_map, color_dist, matrices = open_graph(network)
-	registry = build_algo_registry(sfairsc_k=sfairsc_k)
+	registry = build_algo_registry(sfairsc_k=sfairsc_k, transform_probs=transform_probs)
 
 	dlog(f"Registry has {len(registry)} algorithm configurations")
 
@@ -539,6 +550,11 @@ def main():
 	parser.add_argument("--sfairsc-k", type=int, nargs="+", default=[2, 3, 4, 5],
 						metavar="K",
 						help="k values for sFairSC (default: 2 3 4 5). Pass 0 to skip sFairSC entirely.")
+	parser.add_argument("--transform-p", type=float, nargs="+", default=[0.0, 0.25, 0.5, 0.75, 1.0],
+						metavar="P",
+						help="same_color_p values for MutexWatershed-Transform (default: 0.0 0.25 0.5 0.75 1.0). "
+							 "Controls probability of same-color edges being attractive (+1) vs repulsive (-1). "
+							 "Pass -1 to skip MutexWatershed-Transform entirely.")
 	parser.add_argument("--debug",     action="store_true",
 						help="Enable debug output (graph stats, community sizes, all metrics per run, full tracebacks).")
 	args = parser.parse_args()
@@ -548,11 +564,13 @@ def main():
 	if DEBUG:
 		print("[DEBUG] Debug mode enabled")
 
-	sfairsc_k = [k for k in args.sfairsc_k if k > 0]
+	sfairsc_k    = [k for k in args.sfairsc_k if k > 0]
+	transform_probs = [p for p in args.transform_p if 0.0 <= p <= 1.0]
 
 	all_dfs = []
 	for net in args.networks:
-		df = run_benchmark(net, n_runs=args.runs, timeout=args.timeout, sfairsc_k=sfairsc_k)
+		df = run_benchmark(net, n_runs=args.runs, timeout=args.timeout,
+						   sfairsc_k=sfairsc_k, transform_probs=transform_probs)
 		all_dfs.append(df)
 		print(df.to_string(index=False))
 
