@@ -9,39 +9,27 @@ from pathlib import Path
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 LOG_FILES = {
-    "synthetic-node": "../logs/benchmark_color-node_1000_r01_K2_c05.txt",
-    "synthetic-full": "../logs/benchmark_color-full_1000_r01_K2_c05.txt",
-    "facebook":       "../logs/benchmark_facebook.txt",
+    "facebook": "../logs/benchmark_facebook.txt",
 }
 
 CSV_FILES = {
-    "synthetic-node": "../logs/benchmark_color-node_1000_r01_K2_c05.csv",
-    "synthetic-full": "../logs/benchmark_color-full_1000_r01_K2_c05.csv",
-    "facebook":       "../logs/benchmark_facebook.csv",
+    "facebook": "../logs/benchmark_facebook.csv",
 }
 
-# Order networks appear as sub-tables (top to bottom)
-NETWORK_ORDER = ["synthetic-node", "synthetic-full", "facebook"]
+NETWORK_ORDER = ["facebook"]
 
 NET_LABELS = {
-    "synthetic-node": "synthetic-node",
-    "synthetic-full": "synthetic-full",
-    "facebook":       "Facebook",
+    "facebook": "Facebook",
 }
 
-# sFairSC k values per network
 SFAIRSC_MAP = {
-    "synthetic-node": ("sFairSC-k5",  "sFairSC-k10"),
-    "synthetic-full": ("sFairSC-k6",  "sFairSC-k10"),
-    "facebook":       ("sFairSC-k13", "sFairSC-k15"),
+    "facebook": ("sFairSC-k13", "sFairSC-k15"),
 }
 
 OUTPUT_FILE = "benchmark_table.tex"
 
 # ── Row definitions ───────────────────────────────────────────────────────────
 # (latex_label, algorithm, alpha, sfairsc_role, strategy)
-# sfairsc_role : None | 'mouflon' | 'louvain'
-# strategy     : None = ignore | str = must match df["strategy"] exactly
 
 ROWS = [
     # --- sFairSC ---
@@ -74,7 +62,6 @@ ROWS = [
     (r"MutexWatershed-T ($p_{\rm sc}=1.0$)",  "MutexWatershed-Transform",  None, None, "same_color_p=1.0"),
 ]
 
-# Insert \midrule after these labels
 MIDRULE_AFTER = {
     r"sFairSC, $k=\#c_{\text{Louvain}}$",
     r"FAL (L-Diversity)",
@@ -166,22 +153,20 @@ def fmt_comm(mean, std):
 
 
 # ── Sub-table builder ─────────────────────────────────────────────────────────
-# One sub-table per network: columns are Method | Mod. | Fairness | #Comm | Time
+# Columns: Method | Mod. | Prop. fairness | Unfairness | #Comm | Time
 
 def build_subtable(comm, bench, network, net_label, sfairsc_map, rows,
                    midrule_after, is_first):
     L = []
-
     if not is_first:
         L.append(r"\bigskip")
-
     L.append(r"\noindent\textbf{" + net_label + r"}")
     L.append(r"\vspace{2pt}")
     L.append(r"\resizebox{\linewidth}{!}{%")
-    L.append(r"\begin{tabular}{lrrrr}")
+    L.append(r"\begin{tabular}{lrrrrr}")
     L.append(r"\toprule")
     L.append(r"\textbf{Method} & \textbf{Modularity} & \textbf{Prop.\ fairness}"
-             r" & \textbf{Num.\ comm.} & \textbf{Time (s)} \\")
+             r" & \textbf{Unfairness} & \textbf{Num.\ comm.} & \textbf{Time (s)} \\")
     L.append(r"\midrule")
 
     for label, alg, alpha, sfairsc_role, strategy in rows:
@@ -195,13 +180,14 @@ def build_subtable(comm, bench, network, net_label, sfairsc_map, rows,
             c = get_comm_row(comm, network, alg,
                              str(alpha) if alpha is not None else None)
 
-        mod   = fmt(b["modularity_mean"], b["modularity_std"]) if b is not None else r"--"
-        fexp  = fmt(b["fexp_mean"],       b["fexp_std"])       if b is not None else r"--"
-        rt    = fmt(b["runtime_mean"],    b["runtime_std"])    if b is not None else r"--"
-        ncomm = (fmt_comm(c["n_communities_mean"], c["n_communities_std"])
-                 if c is not None and not pd.isna(c["n_communities_mean"]) else r"--")
+        mod    = fmt(b["modularity_mean"],  b["modularity_std"])  if b is not None else r"--"
+        fexp   = fmt(b["fexp_mean"],        b["fexp_std"])        if b is not None else r"--"
+        unfair = fmt(b["unfairness_mean"],  b["unfairness_std"])  if b is not None else r"--"
+        rt     = fmt(b["runtime_mean"],     b["runtime_std"])     if b is not None else r"--"
+        ncomm  = (fmt_comm(c["n_communities_mean"], c["n_communities_std"])
+                  if c is not None and not pd.isna(c["n_communities_mean"]) else r"--")
 
-        L.append(f"{label} & {mod} & {fexp} & {ncomm} & {rt} \\\\")
+        L.append(f"{label} & {mod} & {fexp} & {unfair} & {ncomm} & {rt} \\\\")
         if label in midrule_after:
             L.append(r"\midrule")
 
@@ -211,14 +197,15 @@ def build_subtable(comm, bench, network, net_label, sfairsc_map, rows,
 
 
 CAPTION = (
-    r"Results for synthetic-node, synthetic-full, and Facebook networks. "
-    r"Columns show modularity, proportional fairness, number of communities, "
-    r"and runtime. Values reported as mean (SD) over 10 runs. "
+    r"Results for the Facebook network. "
+    r"Columns show modularity, proportional fairness, unfairness, "
+    r"number of communities, and runtime. "
+    r"Values reported as mean (SD) over 10 runs. "
     r"MutexWatershed-T denotes the Transform variant; "
     r"$p_{\rm sc}$ is the same-color edge attraction probability. "
     r"Dashes indicate runs skipped due to memory or timeout."
 )
-LABEL = "tab:benchmark"
+LABEL = "tab:benchmark_facebook"
 
 
 def build_table(comm, bench, network_order, net_labels, sfairsc_map, rows, midrule_after):
