@@ -89,20 +89,22 @@ def parse_logs(log_files):
         for line in lines:
             m = ALG_RE.search(line)
             if m:
-                key = (m.group(1), m.group(2))
+                key = (m.group(1), m.group(2), m.group(3))
                 current_key = key
                 records.setdefault(key, [])
                 continue
             m = COMM_RE.search(line)
             if m and current_key is not None:
                 records[current_key].append(int(m.group(1)))
-        for (alg, alpha), counts in records.items():
+        for (alg, alpha, strategy), counts in records.items():
             if not counts:
                 comm_rows.append(dict(network=network, algorithm=alg, alpha=alpha,
+                                      strategy=strategy,
                                       n_runs=0, n_communities_mean=float("nan"),
                                       n_communities_std=float("nan")))
             else:
                 comm_rows.append(dict(network=network, algorithm=alg, alpha=alpha,
+                                      strategy=strategy,
                                       n_runs=len(counts),
                                       n_communities_mean=np.mean(counts),
                                       n_communities_std=np.std(counts, ddof=1) if len(counts) > 1 else 0.0))
@@ -128,12 +130,14 @@ def get_bench_row(bench, network, alg, alpha=None, strategy=None):
     return rows.iloc[0] if not rows.empty else None
 
 
-def get_comm_row(comm, network, alg, alpha=None):
+def get_comm_row(comm, network, alg, alpha=None, strategy=None):
     if comm.empty:
         return None
     mask = (comm["network"] == network) & (comm["algorithm"] == alg)
     if alpha is not None:
         mask &= comm["alpha"].astype(str).str.startswith(str(alpha))
+    if strategy is not None:
+        mask &= comm["strategy"].astype(str) == str(strategy)
     rows = comm[mask]
     return rows.iloc[0] if not rows.empty else None
 
@@ -178,7 +182,8 @@ def build_subtable(comm, bench, network, net_label, sfairsc_map, rows,
         else:
             b = get_bench_row(bench, network, alg, alpha, strategy)
             c = get_comm_row(comm, network, alg,
-                             str(alpha) if alpha is not None else None)
+                             str(alpha) if alpha is not None else None,
+                             strategy)
 
         mod    = fmt(b["modularity_mean"],  b["modularity_std"])  if b is not None else r"--"
         fexp   = fmt(b["fexp_mean"],        b["fexp_std"])        if b is not None else r"--"
